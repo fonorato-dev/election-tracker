@@ -61,6 +61,19 @@ td.angle{color:var(--muted);font-size:12px}
 .gate button{font:inherit;font-weight:600;padding:9px;border:0;border-radius:8px;background:var(--fg);color:var(--card);cursor:pointer}
 .gate .err{color:var(--rep);font-size:13px;min-height:1em;margin:0}
 .gate label{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.stsel{font:inherit;font-size:12px;padding:2px 6px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--muted);max-width:190px;margin-top:4px;cursor:pointer}
+.stsel.conf{color:var(--ok);border-color:var(--ok)}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--fg);color:var(--card);padding:10px 16px;border-radius:8px;font-size:13px;z-index:20;max-width:90vw}
+.toast[hidden]{display:none}
+.ghdlg{position:fixed;inset:0;background:rgba(43,35,24,.45);display:flex;align-items:center;justify-content:center;z-index:15;padding:20px}
+.ghdlg[hidden]{display:none}
+.ghdlg form{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:22px;width:min(100%,440px);display:flex;flex-direction:column;gap:10px;font-size:14px}
+.ghdlg h3{margin:0;font-size:17px}
+.ghdlg ol{margin:0;padding-left:18px;color:var(--muted);font-size:13px}
+.ghdlg input{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.ghdlg .row{display:flex;gap:8px;justify-content:flex-end}
+.ghdlg button{font:inherit;padding:7px 14px;border-radius:8px;border:1px solid var(--line);background:var(--card);cursor:pointer}
+.ghdlg button.primary{background:var(--fg);color:var(--card);border-color:var(--fg)}
 .lock{font-size:12px;color:var(--muted);background:none;border:0;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px}
 @media (max-width:760px){.hide-sm{display:none}h1{font-size:24px}}
 </style>
@@ -75,6 +88,21 @@ td.angle{color:var(--muted);font-size:12px}
     <p class="err" id="gateErr"></p>
   </form>
 </div>
+<div class="toast" id="toast" hidden></div>
+<div class="ghdlg" id="ghDlg" hidden>
+  <form id="ghForm">
+    <h3>Share manual calls with everyone</h3>
+    <p class="note" style="margin:0">Calls you pick in the status dropdown always show on this device right away. To make them show for everyone who opens the tracker, connect a GitHub token once:</p>
+    <ol>
+      <li>On GitHub: Settings → Developer settings → Fine-grained tokens → Generate new token.</li>
+      <li>Repository access: <b>Only select repositories</b> → election-tracker.</li>
+      <li>Permissions → Repository → <b>Contents: Read and write</b>. Set it to expire in 7 days.</li>
+      <li>Generate, copy, and paste it here. It is saved only in this browser.</li>
+    </ol>
+    <input type="password" id="ghToken" placeholder="github_pat_…" autocomplete="off">
+    <div class="row"><button type="button" id="ghRemove">Disconnect</button><button type="button" id="ghCancel">Cancel</button><button type="submit" class="primary">Save</button></div>
+  </form>
+</div>
 <div class="wrap" id="app" hidden>
   <header>
     <div class="title">
@@ -82,7 +110,7 @@ td.angle{color:var(--muted);font-size:12px}
       <h1>Election night race tracker</h1>
     </div>
     <p class="sub">AP has called <b id="nCalled">—</b> of the <b id="nTotal">—</b> races on the watch list. Green = confirmed AP call. Amber = AP headline spotted automatically, verify before sending.</p>
-    <div class="updated" id="updated"><span class="dot"></span><span id="updatedText">Loading…</span><button class="lock" id="lockBtn" type="button">Lock</button></div>
+    <div class="updated" id="updated"><span class="dot"></span><span id="updatedText">Loading…</span><button class="lock" id="ghBtn" type="button">Sharing: off</button><button class="lock" id="lockBtn" type="button">Lock</button></div>
   </header>
 
   <nav class="tabs">
@@ -110,7 +138,7 @@ td.angle{color:var(--muted);font-size:12px}
     </div>
     <div class="card">
       <h2>All races</h2>
-      <p class="note">Democrats in blue, Republicans in red. "Not called" can mean too early, too close, or still counting.</p>
+      <p class="note">Democrats in blue, Republicans in red. "Not called" can mean too early, too close, or still counting. Use the dropdown under a status to mark an AP call yourself (or undo one).</p>
       <div class="filters" id="tierFilters">
         <button class="on" data-tier="">All</button><button data-tier="Top priority">Top priority</button>
         <button data-tier="Senate">Senate</button><button data-tier="House">House</button><button data-tier="Other">Other</button>
@@ -157,14 +185,70 @@ function party(el, text) {
 }
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
+const REPO = 'fonorato-dev/election-tracker';
+const ls = {get: (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+            set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }};
+function pending() { try { return JSON.parse(ls.get('etPending') || '{}'); } catch (e) { return {}; } }
+function effOverrides() {
+  const p = pending(); const out = {...S.overrides};
+  Object.entries(p).forEach(([rid, o]) => {
+    if (JSON.stringify(S.overrides[rid] || null) === JSON.stringify(o)) { delete p[rid]; } else { if (o) out[rid] = o; else delete out[rid]; }
+  });
+  ls.set('etPending', Object.keys(p).length ? JSON.stringify(p) : null);
+  return out;
+}
 function callFor(rid) {
-  const o = S.overrides[rid];
+  const o = (S.eff || {})[rid];
   if (o && o.status === 'Not called') return null;
-  return S.live.calls.find((c) => c.race_id === rid) || null;
+  if (o && o.status === 'Called' && o.winner) {
+    const race = S.races.find((r) => r.race_id === rid) || {race: rid};
+    return {race_id: rid, race: race.race, winner: o.winner, called_at_et: o.called_at_et || '', ts: o.ts || 0,
+            source: 'AP (confirmed)', url: o.url || '', line: o.line || ('AP just called the ' + race.race + ' race: ' + o.winner + ' wins.')};
+  }
+  return S.live.calls.find((c) => c.race_id === rid && c.source.includes('auto')) || null;
+}
+function candList(r) {
+  const out = []; const re = /([^,]+?)\s*\((D|R)\)/g; let m;
+  (r.watch + ', ' + r.opponent).replace(re, (all, n, p) => { out.push(n.trim().replace(/^(Rep|Sen|Gov)\.\s+/, '') + ' (' + p + ')'); });
+  return out;
+}
+function nowET() { return new Date().toLocaleTimeString('en-US', {timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit'}); }
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => { t.hidden = true; }, 5000); }
+
+async function setStatus(r, value) {
+  let o = null;
+  if (value === 'none') o = {status: 'Not called'};
+  else if (value.startsWith('call:')) {
+    const winner = value.slice(5); const losers = candList(r).filter((c) => c !== winner);
+    o = {status: 'Called', winner, called_at_et: nowET(), ts: Math.floor(Date.now() / 1000),
+         line: 'AP just called the ' + r.race + ' race: ' + winner + ' wins' + (losers.length ? ', defeating ' + losers.join(' and ') : '') + '.'};
+  }
+  const p = pending(); p[r.race_id] = o; ls.set('etPending', JSON.stringify(p));
+  S.eff = effOverrides();
+  render();
+  const token = ls.get('etGhToken');
+  if (!token) { toast('Saved on this device. Turn on Sharing (top of page) so everyone sees it.'); return; }
+  try { await saveToGitHub(token, r.race_id, o); toast('Saved. Everyone will see it within about 2 minutes.'); }
+  catch (e) { toast('Saved on this device, but GitHub save failed (' + e.message + '). Check the token under Sharing.'); }
+}
+async function saveToGitHub(token, rid, o, retry = true) {
+  const url = 'https://api.github.com/repos/' + REPO + '/contents/data/overrides.json';
+  const h = {Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json'};
+  const cur = await fetch(url + '?ref=main&t=' + Date.now(), {headers: h, cache: 'no-store'});
+  if (!cur.ok) throw new Error('read ' + cur.status);
+  const meta = await cur.json();
+  const data = JSON.parse(decodeURIComponent(escape(atob(meta.content.replace(/\n/g, '')))));
+  if (o) data[rid] = o; else delete data[rid];
+  const body = {message: (o ? (o.status === 'Called' ? 'Mark ' + rid + ' called: ' + o.winner : 'Mark ' + rid + ' not called') : 'Reset ' + rid + ' to automatic'),
+                content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 1) + '\n'))), sha: meta.sha, branch: 'main'};
+  const put = await fetch(url, {method: 'PUT', headers: {...h, 'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (put.status === 409 && retry) return saveToGitHub(token, rid, o, false);
+  if (!put.ok) throw new Error('write ' + put.status);
 }
 
 function render() {
   const races = S.races;
+  if (!S.eff) S.eff = effOverrides();
   const called = races.filter((r) => callFor(r.race_id));
   const top = races.filter((r) => r.tier === 'Top priority');
   $('nCalled').textContent = called.length; $('nTotal').textContent = races.length;
@@ -172,7 +256,7 @@ function render() {
   $('tTop').textContent = top.filter((r) => callFor(r.race_id)).length + ' / ' + top.length;
 
   const feed = $('feed'); feed.replaceChildren();
-  const calls = S.live.calls.filter((c) => callFor(c.race_id) === c);
+  const calls = races.map((r) => callFor(r.race_id)).filter(Boolean).sort((a, b) => (b.ts || 0) - (a.ts || 0));
   if (!calls.length) feed.append(el('li', '', 'No races on the watch list have been called yet.'));
   calls.forEach((c) => {
     const li = el('li', c.source.includes('confirmed') ? 'conf' : 'auto');
@@ -195,6 +279,13 @@ function render() {
       tr.append(el('td', 'race', r.race), party(el('td'), r.watch), party(el('td', 'hide-sm'), r.opponent), el('td', 'time', r.polls_close_et));
       const st = el('td'); const conf = c && c.source.includes('confirmed');
       st.append(el('span', 'chip' + (c ? (conf ? ' conf' : ' auto') : ''), c ? (conf ? 'Called ' + c.called_at_et : 'AP call reported · verify') : 'Not called'));
+      const o = S.eff[r.race_id]; const sel = el('select', 'stsel' + (o && o.status === 'Called' ? ' conf' : ''));
+      sel.setAttribute('aria-label', 'Set AP status for ' + r.race);
+      sel.append(new Option('Automatic', 'auto'), new Option('Not called', 'none'));
+      candList(r).forEach((n) => sel.append(new Option('AP called: ' + n, 'call:' + n)));
+      sel.value = !o ? 'auto' : o.status === 'Called' ? 'call:' + o.winner : 'none';
+      sel.addEventListener('change', () => setStatus(r, sel.value));
+      st.append(el('br'), sel);
       tr.append(st, party(el('td'), c ? c.winner : ''), el('td', 'angle hide-sm', r.angle));
       tb.append(tr);
     });
@@ -249,6 +340,7 @@ async function load() {
     const [blob, overrides] = await Promise.all([getJSON('data/site.enc'), getJSON('data/overrides.json').catch(() => ({}))]);
     const d = await decryptBlob(blob, PW);
     Object.assign(S, {races: d.races, curated: d.curated, live: d.live || {calls: [], headlines: []}, overrides});
+    S.eff = effOverrides();
     render();
     return true;
   } catch (e) {
@@ -275,6 +367,19 @@ $('gateForm').addEventListener('submit', async (e) => {
   e.preventDefault(); $('gateErr').textContent = ''; $('unlockBtn').textContent = 'Unlocking…';
   await unlock($('pw').value, $('remember').checked);
   $('unlockBtn').textContent = 'Unlock';
+});
+function ghLabel() { $('ghBtn').textContent = ls.get('etGhToken') ? 'Sharing: on' : 'Sharing: off'; }
+ghLabel();
+$('ghBtn').addEventListener('click', () => { $('ghToken').value = ''; $('ghDlg').hidden = false; });
+$('ghCancel').addEventListener('click', () => { $('ghDlg').hidden = true; });
+$('ghRemove').addEventListener('click', () => { ls.set('etGhToken', null); ghLabel(); $('ghDlg').hidden = true; toast('Sharing turned off on this device.'); });
+$('ghForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); const t = $('ghToken').value.trim(); if (!t) return;
+  const r = await fetch('https://api.github.com/repos/' + REPO, {headers: {Authorization: 'Bearer ' + t}}).catch(() => null);
+  if (!r || !r.ok) { toast('That token could not open the election-tracker repo. Check its repository access.'); return; }
+  const info = await r.json();
+  if (!info.permissions || !info.permissions.push) { toast('Token works but cannot write. Set Contents to Read and write.'); return; }
+  ls.set('etGhToken', t); ghLabel(); $('ghDlg').hidden = true; toast('Sharing is on. Calls you set now save for everyone.');
 });
 $('lockBtn').addEventListener('click', () => { store.clear(); location.reload(); });
 

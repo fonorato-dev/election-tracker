@@ -17,6 +17,14 @@ A free, self-updating, password-protected website. No Claude, no API keys, no pa
 
 ## Confirming or correcting a call
 
+**Easiest: the dropdown under each race's status** (Automatic / Not called / AP called: candidate).
+It updates that screen instantly. To make it show for everyone, click **Sharing: off** at the top once and
+paste a fine-grained GitHub token (Only select repositories → election-tracker; Contents: Read and write;
+7-day expiry). The token stays in that browser only. With sharing on, each pick is saved to
+`data/overrides.json` and appears for everyone in about 2 minutes.
+
+**Or by hand:**
+
 Automatic flags come from headline matching, so amber means "AP headline spotted, verify".
 To confirm a call (turns green) or fix a race, edit `data/overrides.json` in the GitHub web editor:
 
