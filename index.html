@@ -63,6 +63,9 @@ td.angle{color:var(--muted);font-size:12px}
 .gate label{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}
 .stsel{font:inherit;font-size:12px;padding:2px 6px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--muted);max-width:190px;margin-top:4px;cursor:pointer}
 .stsel.conf{color:var(--ok);border-color:var(--ok)}
+.chip.pass{color:var(--ok);border-color:currentColor}.chip.fail{color:var(--rep);border-color:currentColor}
+.stsel.pass{color:var(--ok);border-color:var(--ok)}.stsel.fail{color:var(--rep);border-color:var(--rep)}
+.amds td.yn{font-size:13px}.amds td.yn b{font-weight:600}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--fg);color:var(--card);padding:10px 16px;border-radius:8px;font-size:13px;z-index:20;max-width:90vw}
 .toast[hidden]{display:none}
 .ghdlg{position:fixed;inset:0;background:rgba(43,35,24,.45);display:flex;align-items:center;justify-content:center;z-index:15;padding:20px}
@@ -148,6 +151,14 @@ td.angle{color:var(--muted);font-size:12px}
         <tbody id="raceBody"></tbody>
       </table></div>
     </div>
+    <div class="card" id="amendments">
+      <h2>Florida constitutional amendments</h2>
+      <p class="note">Three statewide amendments; each needs at least 60% "yes" to pass. Polls close statewide at 8:00 PM ET. Status follows AP; use the dropdown to set it yourself.</p>
+      <div class="tablebox"><table class="amds">
+        <thead><tr><th>Amendment</th><th>What it does</th><th>AP status</th></tr></thead>
+        <tbody id="amdBody"></tbody>
+      </table></div>
+    </div>
   </section>
 
   <section id="pNews" class="panel" hidden>
@@ -207,6 +218,12 @@ function callFor(rid) {
   }
   return S.live.calls.find((c) => c.race_id === rid && c.source.includes('auto')) || null;
 }
+function measureFor(id) {
+  const o = (S.eff || {})[id];
+  if (o && o.status === 'Not called') return null;
+  if (o && (o.status === 'Passed' || o.status === 'Failed')) return {measure_id: id, result: o.status, called_at_et: o.called_at_et || '', source: 'AP (confirmed)'};
+  return ((S.live || {}).measures || []).find((m) => m.measure_id === id && m.source.includes('auto')) || null;
+}
 function candList(r) {
   const out = []; const re = /([^,]+?)\s*\((D|R)\)/g; let m;
   (r.watch + ', ' + r.opponent).replace(re, (all, n, p) => { out.push(n.trim().replace(/^(Rep|Sen|Gov)\.\s+/, '') + ' (' + p + ')'); });
@@ -223,12 +240,20 @@ async function setStatus(r, value) {
     o = {status: 'Called', winner, called_at_et: nowET(), ts: Math.floor(Date.now() / 1000),
          line: 'AP just called the ' + r.race + ' race: ' + winner + ' wins' + (losers.length ? ', defeating ' + losers.join(' and ') : '') + '.'};
   }
-  const p = pending(); p[r.race_id] = o; ls.set('etPending', JSON.stringify(p));
+  return applyOverride(r.race_id, o);
+}
+async function setMeasure(m, value) {
+  const o = value === 'auto' ? null : value === 'none' ? {status: 'Not called'}
+    : {status: value, called_at_et: nowET(), ts: Math.floor(Date.now() / 1000)};
+  return applyOverride(m.measure_id, o);
+}
+async function applyOverride(id, o) {
+  const p = pending(); p[id] = o; ls.set('etPending', JSON.stringify(p));
   S.eff = effOverrides();
   render();
   const token = ls.get('etGhToken');
   if (!token) { toast('Saved on this device. Turn on Sharing (top of page) so everyone sees it.'); return; }
-  try { await saveToGitHub(token, r.race_id, o); toast('Saved. Everyone will see it within about 2 minutes.'); }
+  try { await saveToGitHub(token, id, o); toast('Saved. Everyone will see it within about 2 minutes.'); }
   catch (e) { toast('Saved on this device, but GitHub save failed (' + e.message + '). Check the token under Sharing.'); }
 }
 async function saveToGitHub(token, rid, o, retry = true) {
@@ -239,7 +264,7 @@ async function saveToGitHub(token, rid, o, retry = true) {
   const meta = await cur.json();
   const data = JSON.parse(decodeURIComponent(escape(atob(meta.content.replace(/\n/g, '')))));
   if (o) data[rid] = o; else delete data[rid];
-  const body = {message: (o ? (o.status === 'Called' ? 'Mark ' + rid + ' called: ' + o.winner : 'Mark ' + rid + ' not called') : 'Reset ' + rid + ' to automatic'),
+  const body = {message: (o ? (o.status === 'Called' ? 'Mark ' + rid + ' called: ' + o.winner : 'Mark ' + rid + ' ' + o.status.toLowerCase()) : 'Reset ' + rid + ' to automatic'),
                 content: btoa(unescape(encodeURIComponent(JSON.stringify(data, null, 1) + '\n'))), sha: meta.sha, branch: 'main'};
   const put = await fetch(url, {method: 'PUT', headers: {...h, 'Content-Type': 'application/json'}, body: JSON.stringify(body)});
   if (put.status === 409 && retry) return saveToGitHub(token, rid, o, false);
@@ -290,8 +315,25 @@ function render() {
       tb.append(tr);
     });
 
+  const ab = $('amdBody'); ab.replaceChildren();
+  (S.measures || []).forEach((m) => {
+    const res = measureFor(m.measure_id); const tr = el('tr');
+    tr.append(el('td', 'race', m.title));
+    const yn = el('td', 'yn'); const y = el('div'); y.append(el('b', '', 'Yes: '), m.yes); const n = el('div'); n.append(el('b', '', 'No: '), m.no);
+    yn.append(y, n); tr.append(yn);
+    const st = el('td'); const conf = res && res.source.includes('confirmed');
+    st.append(el('span', 'chip' + (res ? (res.result === 'Passed' ? ' pass' : ' fail') : ''),
+      res ? (conf ? res.result + (res.called_at_et ? ' · ' + res.called_at_et : '') : 'AP: ' + res.result.toLowerCase() + ' · verify') : 'Not called'));
+    const o = S.eff[m.measure_id]; const sel2 = el('select', 'stsel' + (o && o.status === 'Passed' ? ' pass' : o && o.status === 'Failed' ? ' fail' : ''));
+    sel2.setAttribute('aria-label', 'Set AP status for ' + m.title);
+    sel2.append(new Option('Automatic', 'auto'), new Option('Not called', 'none'), new Option('AP: Passed', 'Passed'), new Option('AP: Failed', 'Failed'));
+    sel2.value = !o ? 'auto' : o.status === 'Not called' ? 'none' : o.status;
+    sel2.addEventListener('change', () => setMeasure(m, sel2.value));
+    st.append(el('br'), sel2); tr.append(st); ab.append(tr);
+  });
+
   const sel = $('raceSelect');
-  if (sel.options.length === 1) races.forEach((r) => sel.append(new Option(r.race, r.race_id)));
+  if (sel.options.length === 1) { races.forEach((r) => sel.append(new Option(r.race, r.race_id))); (S.measures || []).forEach((m) => sel.append(new Option('Florida ' + m.title, m.measure_id))); }
   const hl = $('headlines'); hl.replaceChildren();
   const now = Date.now() / 1000;
   const list = (S.live.headlines || []).filter((h) => !S.race || h.race_id === S.race).slice(0, 80);
@@ -339,7 +381,7 @@ async function load() {
   try {
     const [blob, overrides] = await Promise.all([getJSON('data/site.enc'), getJSON('data/overrides.json').catch(() => ({}))]);
     const d = await decryptBlob(blob, PW);
-    Object.assign(S, {races: d.races, curated: d.curated, live: d.live || {calls: [], headlines: []}, overrides});
+    Object.assign(S, {races: d.races, curated: d.curated, measures: d.measures || [], live: d.live || {calls: [], headlines: []}, overrides});
     S.eff = effOverrides();
     render();
     return true;

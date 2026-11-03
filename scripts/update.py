@@ -82,7 +82,8 @@ AP_ATTRIB = re.compile(
     r"according to (the )?(AP|Associated Press)|Associated Press (projects|calls|declares|says)|AP Decision Desk)", re.I)
 NOT_GENERAL = re.compile(r"\b(primary|primaries|runoff|run-off|nomination|nominee|nominated|caucus|convention|"
                          r"special primary|GOP nod|Democratic nod|party's nod)\b", re.I)
-HEDGE = re.compile(r"\b(leads|leading|ahead|could|may|might|if|poll|polls|expected|likely|favored|race to watch)\b", re.I)
+HEDGE = re.compile(r"\b(leads|leading|ahead|could|may|might|would|if|poll|polls|expected|likely|favored|race to watch|"
+                   r"what to know|explained|guide|on track|trending|appears)\b", re.I)
 ELECTION_DAY = datetime(2026, 11, 3, tzinfo=ET_TZ)
 
 
@@ -128,7 +129,7 @@ def main():
     if not password:
         sys.exit("TRACKER_PASSWORD is not set (add it under Settings > Secrets and variables > Actions)")
     source = decrypt(json.loads((DATA / "source.enc").read_text()), password)
-    races, curated = source["races"], source["curated"]
+    races, curated, measures = source["races"], source["curated"], source.get("measures", [])
     overrides = {k: v for k, v in json.loads((DATA / "overrides.json").read_text()).items() if not k.startswith("_")}
     site_path = DATA / "site.enc"
     try:
@@ -136,6 +137,7 @@ def main():
     except Exception:
         live = {}
     prev_calls = {c["race_id"]: c for c in live.get("calls", []) if c.get("source") == "AP (auto)"}
+    prev_measures = {m["measure_id"]: m for m in live.get("measures", []) if m.get("source") == "AP (auto)"}
 
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=36)
@@ -175,8 +177,53 @@ def main():
                           "url": item["url"], "headline": item["title"], "feed_source": item["source"],
                           "line": f"AP just called the {race['race']} race: {winner[0]} ({winner[1]}) wins{vs}."})
 
+    # Florida amendments: AP headline saying an amendment passed/failed, after polls closed.
+    measure_results = []
+    for m in measures:
+        mid, n = m["measure_id"], m["number"]
+        query = f'"Florida" "Amendment {n}" ({m["keywords"]}) when:2d'
+        try:
+            items = parse_items(fetch_rss(query))
+        except Exception as e:
+            print(f"[warn] {mid}: {e}", file=sys.stderr)
+            errors += 1
+            continue
+        time.sleep(1)
+        items = [i for i in items if i["published"] is None or i["published"] >= cutoff]
+        for i in items[:6]:
+            headlines.append({"race_id": mid, "title": i["title"], "source": i["source"], "url": i["url"],
+                              "published_et": fmt_et(i["published"]) if i["published"] else "",
+                              "ts": i["published"].timestamp() if i["published"] else 0})
+        closed = polls_closed_at(m)
+        prev = prev_measures.get(mid)
+        if prev and prev.get("ts", 0) >= closed.timestamp() and is_ap_call(
+                {"title": prev.get("headline", ""), "source": prev.get("feed_source", "")}):
+            measure_results.append(prev)
+            continue
+        for i in items:
+            if not i["published"] or i["published"] < closed or not is_ap_call(i):
+                continue
+            hit = re.search(rf"\bAmendment {n}\b[^.:]*?\b(passes|passed|approved|approve|wins approval|"
+                            rf"fails|failed|rejected|reject|defeated|falls short|goes down)\b", i["title"], re.I)
+            if hit:
+                passed = hit.group(1).lower() in ("passes", "passed", "approved", "approve", "wins approval")
+                measure_results.append({"measure_id": mid, "result": "Passed" if passed else "Failed",
+                                        "called_at_et": fmt_et(i["published"]), "ts": i["published"].timestamp(),
+                                        "source": "AP (auto)", "url": i["url"], "headline": i["title"],
+                                        "feed_source": i["source"]})
+                break
+    for mid, o in overrides.items():
+        if not mid.startswith("FL-A"):
+            continue
+        measure_results = [x for x in measure_results if x["measure_id"] != mid]
+        if o.get("status") in ("Passed", "Failed"):
+            measure_results.append({"measure_id": mid, "result": o["status"], "called_at_et": o.get("called_at_et", ""),
+                                    "ts": o.get("ts", now.timestamp()), "source": "AP (confirmed)", "url": o.get("url", "")})
+
     # Manual overrides win over automatic flags.
     for rid, o in overrides.items():
+        if rid.startswith("FL-A"):
+            continue
         calls = [c for c in calls if c["race_id"] != rid]
         if o.get("status") == "Called" and o.get("winner"):
             race = next((r for r in races if r["race_id"] == rid), {"race": rid})
@@ -195,8 +242,9 @@ def main():
     live = {"updated_et": now.astimezone(ET_TZ).strftime("%b %-d, %-I:%M %p ET"),
             "feed_errors": errors,
             "calls": sorted(calls, key=lambda c: -c["ts"]),
+            "measures": measure_results,
             "headlines": uniq[:250]}
-    site_path.write_text(json.dumps(encrypt({"races": races, "curated": curated, "live": live}, password)))
+    site_path.write_text(json.dumps(encrypt({"races": races, "curated": curated, "measures": measures, "live": live}, password)))
     print(f"ok: {len(calls)} calls, {len(uniq)} headlines, {errors} feed errors")
 
 
