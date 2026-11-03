@@ -57,6 +57,18 @@ def fetch_rss(query):
         return r.read()
 
 
+def fetch_items(query, ap_too=True):
+    """Main query plus the same query limited to apnews.com, so AP's own stories are always seen."""
+    items = parse_items(fetch_rss(query))
+    if ap_too:
+        time.sleep(1)
+        try:
+            items += parse_items(fetch_rss(query + " site:apnews.com"))
+        except Exception as e:
+            print(f"[warn] AP-only query failed: {e}", file=sys.stderr)
+    return items
+
+
 def parse_items(xml_bytes):
     items = []
     root = ET.fromstring(xml_bytes)
@@ -64,22 +76,20 @@ def parse_items(xml_bytes):
         title = (it.findtext("title") or "").strip()
         src_el = it.find("source")
         source = (src_el.text or "").strip() if src_el is not None else ""
+        source_url = (src_el.get("url") or "").strip() if src_el is not None else ""
         if source and title.endswith(" - " + source):
             title = title[: -len(" - " + source)]
         try:
             published = parsedate_to_datetime(it.findtext("pubDate") or "")
         except (TypeError, ValueError):
             published = None
-        items.append({"title": title, "source": source, "url": (it.findtext("link") or "").strip(),
+        items.append({"title": title, "source": source, "source_url": source_url, "url": (it.findtext("link") or "").strip(),
                       "published": published})
     return items
 
 
-# A flag needs ALL of: explicit AP attribution, a win verb next to a candidate's name,
+# A flag needs ALL of: a story published by the Associated Press itself, a win verb next to a candidate's name,
 # no primary/runoff/nomination wording, and a publish time after that race's polls closed tonight.
-AP_ATTRIB = re.compile(
-    r"(\bAP\s+(projects|calls|declares|says|race call)\b|\bAP\s+projection\b|[:,(-]\s*AP\s*\)?\s*$|"
-    r"according to (the )?(AP|Associated Press)|Associated Press (projects|calls|declares|says)|AP Decision Desk)", re.I)
 NOT_GENERAL = re.compile(r"\b(primary|primaries|runoff|run-off|nomination|nominee|nominated|caucus|convention|"
                          r"special primary|GOP nod|Democratic nod|party's nod)\b", re.I)
 HEDGE = re.compile(r"\b(leads|leading|ahead|could|may|might|would|if|poll|polls|expected|likely|favored|race to watch|"
@@ -94,11 +104,20 @@ def polls_closed_at(race):
     return day.replace(hour=t.hour, minute=t.minute)
 
 
+AP_NAMES = ("associated press", "ap news", "ap")
+
+
+def from_ap(item):
+    """True only when the story is published by the Associated Press itself (apnews.com)."""
+    name = (item.get("source") or "").strip().lower()
+    url = (item.get("source_url") or "").lower()
+    return name in AP_NAMES or "apnews.com" in url
+
+
 def is_ap_call(item):
+    """AP-published, general election, and not hedged. Other outlets citing AP do not count."""
     t = item["title"]
-    src = item["source"].lower()
-    ap_source = src in ("associated press", "ap news", "ap")
-    return bool(AP_ATTRIB.search(t) or ap_source) and not NOT_GENERAL.search(t) and not HEDGE.search(t)
+    return from_ap(item) and not NOT_GENERAL.search(t) and not HEDGE.search(t)
 
 
 def detect_call(race, items, cands):
@@ -116,6 +135,7 @@ def detect_call(race, items, cands):
 def still_valid(call, race):
     """Re-check an earlier automatic flag against the current rules."""
     item = {"title": call.get("headline", ""), "source": call.get("feed_source", ""),
+            "source_url": call.get("feed_source_url", ""),
             "published": datetime.fromtimestamp(call.get("ts", 0), timezone.utc)}
     return item["published"] >= polls_closed_at(race) and is_ap_call(item)
 
@@ -151,7 +171,7 @@ def main():
         names = " OR ".join(f'"{c[0]}"' for c in cands)
         query = f"({names}) {RACE_KEYWORDS.get(rid, '')} when:2d"
         try:
-            items = parse_items(fetch_rss(query))
+            items = fetch_items(query)
         except Exception as e:  # keep going if one feed fails
             print(f"[warn] {rid}: {e}", file=sys.stderr)
             errors += 1
@@ -175,6 +195,7 @@ def main():
             calls.append({"race_id": rid, "race": race["race"], "winner": f"{winner[0]} ({winner[1]})",
                           "called_at_et": fmt_et(when), "ts": when.timestamp(), "source": "AP (auto)",
                           "url": item["url"], "headline": item["title"], "feed_source": item["source"],
+                          "feed_source_url": item.get("source_url", ""),
                           "line": f"AP just called the {race['race']} race: {winner[0]} ({winner[1]}) wins{vs}."})
 
     # Florida amendments: AP headline saying an amendment passed/failed, after polls closed.
@@ -183,7 +204,7 @@ def main():
         mid, n = m["measure_id"], m["number"]
         query = f'"Florida" "Amendment {n}" ({m["keywords"]}) when:2d'
         try:
-            items = parse_items(fetch_rss(query))
+            items = fetch_items(query)
         except Exception as e:
             print(f"[warn] {mid}: {e}", file=sys.stderr)
             errors += 1
@@ -197,7 +218,8 @@ def main():
         closed = polls_closed_at(m)
         prev = prev_measures.get(mid)
         if prev and prev.get("ts", 0) >= closed.timestamp() and is_ap_call(
-                {"title": prev.get("headline", ""), "source": prev.get("feed_source", "")}):
+                {"title": prev.get("headline", ""), "source": prev.get("feed_source", ""),
+                 "source_url": prev.get("feed_source_url", "")}):
             measure_results.append(prev)
             continue
         for i in items:
@@ -210,7 +232,7 @@ def main():
                 measure_results.append({"measure_id": mid, "result": "Passed" if passed else "Failed",
                                         "called_at_et": fmt_et(i["published"]), "ts": i["published"].timestamp(),
                                         "source": "AP (auto)", "url": i["url"], "headline": i["title"],
-                                        "feed_source": i["source"]})
+                                        "feed_source": i["source"], "feed_source_url": i.get("source_url", "")})
                 break
     for mid, o in overrides.items():
         if not mid.startswith("FL-A"):

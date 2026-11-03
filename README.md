@@ -2,7 +2,7 @@
 
 A free, self-updating, password-protected website. No Claude, no API keys, no paid services.
 
-- **GitHub Actions** runs `scripts/update.py` every ~10 minutes. It pulls Google News headlines for each watch-list candidate and flags a race only when a headline explicitly credits an **AP call** for tonight's general election (shown in amber as "verify"). Primary/runoff/nomination stories, hedged headlines ("leads", "expected") and anything published before that race's polls closed are ignored.
+- **GitHub Actions** runs `scripts/update.py` every ~10 minutes. It pulls Google News headlines for each watch-list candidate. **Only stories published by the Associated Press itself (apnews.com) can change a race's status automatically**; other outlets citing AP are ignored, as are primary/runoff/nomination stories, hedged headlines ("leads", "expected") and anything published before that race's polls closed. Automatic calls show in amber as "verify"; anyone can still mark a race with the status dropdown.
 - **GitHub Pages** serves `index.html`. After the password is entered, the page re-reads the data every 60 seconds, so an open tab updates itself.
 - **Password protection:** the watch list, headlines and calls are stored encrypted (AES-256) in `data/source.enc` and `data/site.enc`. The page decrypts them in the browser only with the right password, so the repo and site show nothing readable without it.
 

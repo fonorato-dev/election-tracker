@@ -112,7 +112,7 @@ td.angle{color:var(--muted);font-size:12px}
       <svg class="flag" viewBox="0 0 190 100" role="img" aria-label="United States flag"><defs><pattern id="st" width="12.67" height="10.77" patternUnits="userSpaceOnUse"><circle cx="6.3" cy="5.4" r="2.3" fill="#fff"/></pattern></defs><rect width="190" height="100" fill="#fff"/><g fill="#b22234"><rect y="0" width="190" height="7.69"/><rect y="15.38" width="190" height="7.69"/><rect y="30.77" width="190" height="7.69"/><rect y="46.15" width="190" height="7.69"/><rect y="61.54" width="190" height="7.69"/><rect y="76.92" width="190" height="7.69"/><rect y="92.31" width="190" height="7.69"/></g><rect width="76" height="53.85" fill="#3c3b6e"/><rect width="76" height="53.85" fill="url(#st)"/></svg>
       <h1>Election night race tracker</h1>
     </div>
-    <p class="sub">AP has called <b id="nCalled">—</b> of the <b id="nTotal">—</b> races on the watch list. Green = confirmed AP call. Amber = AP headline spotted automatically, verify before sending.</p>
+    <p class="sub">AP has called <b id="nCalled">—</b> of the <b id="nTotal">—</b> races on the watch list. Green = call confirmed by you. Amber = found automatically in an Associated Press story (the only automatic source), verify before sending.</p>
     <div class="updated" id="updated"><span class="dot"></span><span id="updatedText">Loading…</span><button class="lock" id="ghBtn" type="button">Sharing: off</button><button class="lock" id="lockBtn" type="button">Lock</button></div>
   </header>
 
@@ -153,7 +153,7 @@ td.angle{color:var(--muted);font-size:12px}
     </div>
     <div class="card" id="amendments">
       <h2>Florida constitutional amendments</h2>
-      <p class="note">Three statewide amendments; each needs at least 60% "yes" to pass. Polls close statewide at 8:00 PM ET. Status follows AP; use the dropdown to set it yourself.</p>
+      <p class="note">Three statewide amendments; each needs at least 60% "yes" to pass. Polls close statewide at 8:00 PM ET. Automatic status comes only from Associated Press stories; use the dropdown to set it yourself.</p>
       <div class="tablebox"><table class="amds">
         <thead><tr><th>Amendment</th><th>What it does</th><th>AP status</th></tr></thead>
         <tbody id="amdBody"></tbody>
@@ -286,7 +286,7 @@ function render() {
   calls.forEach((c) => {
     const li = el('li', c.source.includes('confirmed') ? 'conf' : 'auto');
     li.append(party(el('div', 'line'), c.line));
-    const meta = el('div', 'meta', [c.called_at_et, c.source.includes('auto') ? 'AP headline spotted automatically · verify' : 'AP · confirmed'].filter(Boolean).join(' · '));
+    const meta = el('div', 'meta', [c.called_at_et, c.source.includes('auto') ? 'Found in an AP story · verify' : 'AP · confirmed'].filter(Boolean).join(' · '));
     if (c.url) { meta.append(' · '); const a = el('a', '', 'source'); a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; meta.append(a); }
     li.append(meta); feed.append(li);
   });
