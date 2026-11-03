@@ -5,7 +5,7 @@ on:
     - cron: "*/10 * * * *"   # every 10 minutes (GitHub may run it a few minutes late)
   workflow_dispatch: {}      # lets you click "Run workflow" by hand
   push:
-    paths: ["data/overrides.json", "data/source.enc"]
+    paths: ["data/overrides.json", "data/source.enc", "scripts/**"]
 
 permissions:
   contents: write

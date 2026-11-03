@@ -75,22 +75,48 @@ def parse_items(xml_bytes):
     return items
 
 
-def is_ap(item):
-    s = (item["source"] + " " + item["title"]).lower()
-    return "associated press" in s or item["source"].lower() in ("ap news", "ap") or " ap " in f" {s} " or "ap projects" in s or "ap calls" in s
+# A flag needs ALL of: explicit AP attribution, a win verb next to a candidate's name,
+# no primary/runoff/nomination wording, and a publish time after that race's polls closed tonight.
+AP_ATTRIB = re.compile(
+    r"(\bAP\s+(projects|calls|declares|says|race call)\b|\bAP\s+projection\b|[:,(-]\s*AP\s*\)?\s*$|"
+    r"according to (the )?(AP|Associated Press)|Associated Press (projects|calls|declares|says)|AP Decision Desk)", re.I)
+NOT_GENERAL = re.compile(r"\b(primary|primaries|runoff|run-off|nomination|nominee|nominated|caucus|convention|"
+                         r"special primary|GOP nod|Democratic nod|party's nod)\b", re.I)
+HEDGE = re.compile(r"\b(leads|leading|ahead|could|may|might|if|poll|polls|expected|likely|favored|race to watch)\b", re.I)
+ELECTION_DAY = datetime(2026, 11, 3, tzinfo=ET_TZ)
+
+
+def polls_closed_at(race):
+    """'8:00 PM' on Nov 3 (ET); '1:00 AM' means Nov 4."""
+    t = datetime.strptime(race["polls_close_et"], "%I:%M %p")
+    day = ELECTION_DAY + timedelta(days=1 if t.hour < 12 else 0)
+    return day.replace(hour=t.hour, minute=t.minute)
+
+
+def is_ap_call(item):
+    t = item["title"]
+    src = item["source"].lower()
+    ap_source = src in ("associated press", "ap news", "ap")
+    return bool(AP_ATTRIB.search(t) or ap_source) and not NOT_GENERAL.search(t) and not HEDGE.search(t)
 
 
 def detect_call(race, items, cands):
-    """Return (winner_tuple, item) if an AP headline says one candidate won."""
+    """Return (winner_tuple, item) only for an explicit AP general-election call made after polls closed."""
+    closed = polls_closed_at(race)
     for item in items:
-        if not is_ap(item):
+        if not item["published"] or item["published"] < closed or not is_ap_call(item):
             continue
-        t = item["title"]
         for c in cands:
-            if re.search(rf"\b{re.escape(c[2])}\b[^.]*?\b{CALL_WORDS}\b", t, re.I) and not re.search(
-                    rf"\b(leads|leading|ahead|could|may|might|if)\b", t, re.I):
+            if re.search(rf"\b{re.escape(c[2])}\b[^.:]*?\b{CALL_WORDS}\b", item["title"], re.I):
                 return c, item
     return None, None
+
+
+def still_valid(call, race):
+    """Re-check an earlier automatic flag against the current rules."""
+    item = {"title": call.get("headline", ""), "source": call.get("feed_source", ""),
+            "published": datetime.fromtimestamp(call.get("ts", 0), timezone.utc)}
+    return item["published"] >= polls_closed_at(race) and is_ap_call(item)
 
 
 def fmt_et(dt):
@@ -136,7 +162,7 @@ def main():
                               "published_et": fmt_et(i["published"]) if i["published"] else "",
                               "ts": i["published"].timestamp() if i["published"] else 0})
 
-        if rid in prev_calls:  # keep an earlier automatic flag
+        if rid in prev_calls and still_valid(prev_calls[rid], race):  # keep an earlier valid flag
             calls.append(prev_calls[rid])
             continue
         winner, item = detect_call(race, items, cands)
@@ -146,7 +172,7 @@ def main():
             when = item["published"] or now
             calls.append({"race_id": rid, "race": race["race"], "winner": f"{winner[0]} ({winner[1]})",
                           "called_at_et": fmt_et(when), "ts": when.timestamp(), "source": "AP (auto)",
-                          "url": item["url"], "headline": item["title"],
+                          "url": item["url"], "headline": item["title"], "feed_source": item["source"],
                           "line": f"AP just called the {race['race']} race: {winner[0]} ({winner[1]}) wins{vs}."})
 
     # Manual overrides win over automatic flags.
