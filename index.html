@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Election night race tracker</title>
+<style>
+:root{--bg:#e9dcc3;--card:#fbf6ec;--line:#d6c39c;--fg:#2b2318;--muted:#6b5b44;--ok:#2e7d4f;--warn:#a3670a;--dem:#1d4fa8;--rep:#b3202a;--r:10px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:24px 20px 60px;display:flex;flex-direction:column;gap:20px}
+.title{display:flex;align-items:center;gap:12px}
+.flag{width:46px;height:auto;flex:none;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+h1{font-family:Georgia,"Times New Roman",serif;font-weight:400;font-size:30px;margin:0}
+.sub{margin:6px 0 0;color:var(--muted)}
+.updated{font-size:13px;color:var(--muted);margin-top:4px}
+.updated .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px;vertical-align:middle}
+.updated.stale .dot{background:var(--warn)}
+.dem{color:var(--dem);font-weight:600}.rep{color:var(--rep);font-weight:600}
+.tabs{display:flex;gap:4px;border-bottom:2px solid var(--line)}
+.tabs button{font:inherit;font-weight:500;padding:8px 14px;border:0;border-bottom:3px solid transparent;margin-bottom:-2px;background:none;color:var(--muted);cursor:pointer}
+.tabs button.on{color:var(--fg);border-bottom-color:var(--rep)}
+.panel{display:flex;flex-direction:column;gap:20px}.panel[hidden]{display:none}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.card h2{font-size:17px;font-weight:600;margin:0 0 4px}
+.note{color:var(--muted);font-size:13px;margin:0 0 12px}
+.k{color:var(--muted);font-size:13px}.v{font-family:Georgia,serif;font-size:30px;font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr));gap:12px}
+.feed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;max-height:440px;overflow:auto}
+.feed li{border-left:3px solid var(--line);padding:4px 10px}
+.feed li.conf{border-left-color:var(--ok)}.feed li.auto{border-left-color:var(--warn)}
+.feed .line{user-select:all}.feed .meta{color:var(--muted);font-size:12px;margin-top:2px}
+a{color:inherit}
+.close{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.close li{display:grid;grid-template-columns:80px 1fr;gap:8px}.close .t{font-weight:600;font-variant-numeric:tabular-nums}
+.filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;align-items:center}
+.filters button,.filters select{font:inherit;font-size:13px;padding:4px 10px;border:1px solid var(--line);border-radius:999px;background:var(--card);color:var(--fg);cursor:pointer}
+.filters button.on{background:var(--fg);color:var(--card);border-color:var(--fg)}
+.tablebox{overflow:auto;max-height:720px}
+table{width:100%;border-collapse:collapse}
+th{position:sticky;top:0;background:var(--card);text-align:left;font-size:12px;color:var(--muted);font-weight:500;padding:6px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.race{font-weight:600;white-space:nowrap}td.time{white-space:nowrap;font-variant-numeric:tabular-nums}
+td.angle{color:var(--muted);font-size:12px}
+.chip{display:inline-block;font-size:12px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);white-space:nowrap;color:var(--muted)}
+.chip.conf{color:var(--ok);border-color:currentColor}.chip.auto{color:var(--warn);border-color:currentColor}
+.news{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px}
+.news li{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:4px}
+.news .nmeta{font-size:12px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.news a.nt{font-weight:600;text-decoration:none}.news a.nt:hover{text-decoration:underline}
+.news p{margin:0;font-size:13px}
+.tag{font-size:11px;padding:0 7px;border-radius:999px;border:1px solid var(--line);background:var(--bg)}
+.tag.fresh{background:var(--rep);border-color:var(--rep);color:#fff}
+.empty{color:var(--muted);font-size:13px}
+.gate{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:10;padding:20px}
+.gate[hidden]{display:none}
+.gate form{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:28px;width:min(100%,360px);display:flex;flex-direction:column;gap:12px}
+.gate h2{font-family:Georgia,serif;font-weight:400;font-size:22px;margin:0;display:flex;align-items:center;gap:10px}
+.gate input[type=password]{font:inherit;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.gate button{font:inherit;font-weight:600;padding:9px;border:0;border-radius:8px;background:var(--fg);color:var(--card);cursor:pointer}
+.gate .err{color:var(--rep);font-size:13px;min-height:1em;margin:0}
+.gate label{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.lock{font-size:12px;color:var(--muted);background:none;border:0;cursor:pointer;text-decoration:underline;padding:0;margin-left:8px}
+@media (max-width:760px){.hide-sm{display:none}h1{font-size:24px}}
+</style>
+</head>
+<body>
+<div class="gate" id="gate">
+  <form id="gateForm">
+    <h2><svg width="34" viewBox="0 0 190 100" aria-hidden="true"><rect width="190" height="100" fill="#fff"/><g fill="#b22234"><rect y="0" width="190" height="7.69"/><rect y="15.38" width="190" height="7.69"/><rect y="30.77" width="190" height="7.69"/><rect y="46.15" width="190" height="7.69"/><rect y="61.54" width="190" height="7.69"/><rect y="76.92" width="190" height="7.69"/><rect y="92.31" width="190" height="7.69"/></g><rect width="76" height="53.85" fill="#3c3b6e"/></svg>Race tracker</h2>
+    <input type="password" id="pw" placeholder="Password" autocomplete="current-password" required autofocus>
+    <label><input type="checkbox" id="remember"> Remember on this device</label>
+    <button type="submit" id="unlockBtn">Unlock</button>
+    <p class="err" id="gateErr"></p>
+  </form>
+</div>
+<div class="wrap" id="app" hidden>
+  <header>
+    <div class="title">
+      <svg class="flag" viewBox="0 0 190 100" role="img" aria-label="United States flag"><defs><pattern id="st" width="12.67" height="10.77" patternUnits="userSpaceOnUse"><circle cx="6.3" cy="5.4" r="2.3" fill="#fff"/></pattern></defs><rect width="190" height="100" fill="#fff"/><g fill="#b22234"><rect y="0" width="190" height="7.69"/><rect y="15.38" width="190" height="7.69"/><rect y="30.77" width="190" height="7.69"/><rect y="46.15" width="190" height="7.69"/><rect y="61.54" width="190" height="7.69"/><rect y="76.92" width="190" height="7.69"/><rect y="92.31" width="190" height="7.69"/></g><rect width="76" height="53.85" fill="#3c3b6e"/><rect width="76" height="53.85" fill="url(#st)"/></svg>
+      <h1>Election night race tracker</h1>
+    </div>
+    <p class="sub">AP has called <b id="nCalled">—</b> of the <b id="nTotal">—</b> races on the watch list. Green = confirmed AP call. Amber = AP headline spotted automatically, verify before sending.</p>
+    <div class="updated" id="updated"><span class="dot"></span><span id="updatedText">Loading…</span><button class="lock" id="lockBtn" type="button">Lock</button></div>
+  </header>
+
+  <nav class="tabs">
+    <button class="on" data-tab="pRaces">Race tracker</button>
+    <button data-tab="pNews">News &amp; live coverage</button>
+  </nav>
+
+  <section id="pRaces" class="panel">
+    <div class="tiles">
+      <div class="card"><div class="k">Called by AP</div><div class="v" id="tCalled">—</div></div>
+      <div class="card"><div class="k">Not yet called</div><div class="v" id="tPending">—</div></div>
+      <div class="card"><div class="k">Top-priority races called</div><div class="v" id="tTop">—</div></div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h2>Latest calls</h2>
+        <p class="note">Newest first. Each line is written to paste straight into a client update.</p>
+        <ul class="feed" id="feed"></ul>
+      </div>
+      <div class="card">
+        <h2>When polls close (ET)</h2>
+        <p class="note">Latest statewide closing time. Calls can't come before this.</p>
+        <ul class="close" id="closings"></ul>
+      </div>
+    </div>
+    <div class="card">
+      <h2>All races</h2>
+      <p class="note">Democrats in blue, Republicans in red. "Not called" can mean too early, too close, or still counting.</p>
+      <div class="filters" id="tierFilters">
+        <button class="on" data-tier="">All</button><button data-tier="Top priority">Top priority</button>
+        <button data-tier="Senate">Senate</button><button data-tier="House">House</button><button data-tier="Other">Other</button>
+      </div>
+      <div class="tablebox"><table>
+        <thead><tr><th>Race</th><th>Candidate to watch</th><th class="hide-sm">Opponent</th><th>Polls close</th><th>AP status</th><th>Winner</th><th class="hide-sm">Notes</th></tr></thead>
+        <tbody id="raceBody"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section id="pNews" class="panel" hidden>
+    <div class="card">
+      <h2>Latest headlines</h2>
+      <p class="note">Pulled automatically every ~10 minutes from Google News, only for the candidates on the watch list. Red tag = posted in the last hour.</p>
+      <div class="filters"><select id="raceSelect" aria-label="Filter by race"><option value="">All races</option></select></div>
+      <ul class="news" id="headlines"></ul>
+    </div>
+    <div class="card">
+      <h2>Background reading</h2>
+      <p class="note">Hand-picked pre-election coverage of the watch-list races, with short summaries.</p>
+      <ul class="news" id="curated"></ul>
+    </div>
+  </section>
+</div>
+
+<script>
+const S = {races: [], curated: [], live: {calls: [], headlines: []}, overrides: {}, tier: '', race: ''};
+const $ = (id) => document.getElementById(id);
+
+function party(el, text) {
+  el.replaceChildren();
+  const re = /((?:(?:Rep|Sen|Gov)\.\s)?(?:[A-Z][\w.'-]*\s?)+)\((D|R)\)/g;
+  const s = String(text || ''); let last = 0, m;
+  while ((m = re.exec(s))) {
+    const start = m.index + m[1].match(/^\s*/)[0].length;
+    if (start > last) el.append(s.slice(last, start));
+    const sp = document.createElement('span'); sp.className = m[2] === 'D' ? 'dem' : 'rep';
+    sp.textContent = s.slice(start, m.index + m[0].length); el.append(sp);
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) el.append(s.slice(last));
+  return el;
+}
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+function callFor(rid) {
+  const o = S.overrides[rid];
+  if (o && o.status === 'Not called') return null;
+  return S.live.calls.find((c) => c.race_id === rid) || null;
+}
+
+function render() {
+  const races = S.races;
+  const called = races.filter((r) => callFor(r.race_id));
+  const top = races.filter((r) => r.tier === 'Top priority');
+  $('nCalled').textContent = called.length; $('nTotal').textContent = races.length;
+  $('tCalled').textContent = called.length; $('tPending').textContent = races.length - called.length;
+  $('tTop').textContent = top.filter((r) => callFor(r.race_id)).length + ' / ' + top.length;
+
+  const feed = $('feed'); feed.replaceChildren();
+  const calls = S.live.calls.filter((c) => callFor(c.race_id) === c);
+  if (!calls.length) feed.append(el('li', '', 'No races on the watch list have been called yet.'));
+  calls.forEach((c) => {
+    const li = el('li', c.source.includes('confirmed') ? 'conf' : 'auto');
+    li.append(party(el('div', 'line'), c.line));
+    const meta = el('div', 'meta', [c.called_at_et, c.source.includes('auto') ? 'AP headline spotted automatically · verify' : 'AP · confirmed'].filter(Boolean).join(' · '));
+    if (c.url) { meta.append(' · '); const a = el('a', '', 'source'); a.href = c.url; a.target = '_blank'; a.rel = 'noopener'; meta.append(a); }
+    li.append(meta); feed.append(li);
+  });
+
+  const groups = new Map();
+  races.forEach((r) => { if (!groups.has(r.polls_close_et)) groups.set(r.polls_close_et, {o: +r.close_order, ids: []}); groups.get(r.polls_close_et).ids.push(r.race_id); });
+  const cl = $('closings'); cl.replaceChildren();
+  [...groups].sort((a, b) => a[1].o - b[1].o).forEach(([t, g]) => { const li = el('li'); li.append(el('span', 't', t), el('span', '', g.ids.join(', '))); cl.append(li); });
+
+  const tb = $('raceBody'); tb.replaceChildren();
+  races.filter((r) => !S.tier || r.tier === S.tier)
+    .sort((a, b) => (!!callFor(a.race_id) - !!callFor(b.race_id)) || a.close_order - b.close_order)
+    .forEach((r) => {
+      const c = callFor(r.race_id); const tr = el('tr');
+      tr.append(el('td', 'race', r.race), party(el('td'), r.watch), party(el('td', 'hide-sm'), r.opponent), el('td', 'time', r.polls_close_et));
+      const st = el('td'); const conf = c && c.source.includes('confirmed');
+      st.append(el('span', 'chip' + (c ? (conf ? ' conf' : ' auto') : ''), c ? (conf ? 'Called ' + c.called_at_et : 'AP call reported · verify') : 'Not called'));
+      tr.append(st, party(el('td'), c ? c.winner : ''), el('td', 'angle hide-sm', r.angle));
+      tb.append(tr);
+    });
+
+  const sel = $('raceSelect');
+  if (sel.options.length === 1) races.forEach((r) => sel.append(new Option(r.race, r.race_id)));
+  const hl = $('headlines'); hl.replaceChildren();
+  const now = Date.now() / 1000;
+  const list = (S.live.headlines || []).filter((h) => !S.race || h.race_id === S.race).slice(0, 80);
+  if (!list.length) hl.append(el('li', 'empty', 'No headlines yet. They appear after the first automatic update.'));
+  list.forEach((h) => {
+    const li = el('li'); const meta = el('div', 'nmeta');
+    meta.append(el('span', 'tag' + (now - h.ts < 3600 ? ' fresh' : ''), h.race_id), [h.source, h.published_et].filter(Boolean).join(' · '));
+    const a = el('a', 'nt', h.title); a.href = h.url; a.target = '_blank'; a.rel = 'noopener';
+    li.append(meta, a); hl.append(li);
+  });
+
+  const cu = $('curated'); cu.replaceChildren();
+  S.curated.filter((n) => !S.race || n.race_id === S.race).sort((a, b) => b.seq - a.seq).forEach((n) => {
+    const li = el('li'); const meta = el('div', 'nmeta');
+    meta.append(el('span', 'tag', n.race_id), [n.kind, n.outlet, n.published].filter(Boolean).join(' · '));
+    const a = el('a', 'nt', n.title); a.href = n.url; a.target = '_blank'; a.rel = 'noopener';
+    li.append(meta, a, party(el('p'), n.summary)); cu.append(li);
+  });
+
+  const up = $('updated');
+  $('updatedText').textContent = S.live.updated_et ? 'Data last updated ' + S.live.updated_et + ' · page checks every minute' : 'Waiting for the first automatic update…';
+  up.classList.toggle('stale', !S.live.updated_et);
+}
+
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function decryptBlob(blob, password) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({name: 'PBKDF2', salt: b64(blob.salt), iterations: blob.iter || 250000, hash: 'SHA-256'},
+    base, {name: 'AES-GCM', length: 256}, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({name: 'AES-GCM', iv: b64(blob.iv)}, key, b64(blob.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function getJSON(path) {
+  const r = await fetch(path + '?t=' + Date.now(), {cache: 'no-store'});
+  if (!r.ok) throw new Error(path + ' ' + r.status);
+  return r.json();
+}
+const store = {
+  get: () => { try { return sessionStorage.getItem('etpw') || localStorage.getItem('etpw'); } catch (e) { return null; } },
+  set: (pw, keep) => { try { sessionStorage.setItem('etpw', pw); if (keep) localStorage.setItem('etpw', pw); } catch (e) {} },
+  clear: () => { try { sessionStorage.removeItem('etpw'); localStorage.removeItem('etpw'); } catch (e) {} }
+};
+let PW = null, timer = null;
+async function load() {
+  try {
+    const [blob, overrides] = await Promise.all([getJSON('data/site.enc'), getJSON('data/overrides.json').catch(() => ({}))]);
+    const d = await decryptBlob(blob, PW);
+    Object.assign(S, {races: d.races, curated: d.curated, live: d.live || {calls: [], headlines: []}, overrides});
+    render();
+    return true;
+  } catch (e) {
+    if (e.name === 'OperationError') throw e;
+    $('updatedText').textContent = 'Could not load data (' + e.message + '). Retrying…';
+    return false;
+  }
+}
+async function unlock(pw, keep) {
+  PW = pw;
+  try {
+    await load();
+  } catch (e) {
+    PW = null; store.clear();
+    $('gate').hidden = false; $('app').hidden = true;
+    $('gateErr').textContent = 'Wrong password.';
+    return;
+  }
+  store.set(pw, keep);
+  $('gate').hidden = true; $('app').hidden = false;
+  clearInterval(timer); timer = setInterval(() => load().catch(() => location.reload()), 60000);
+}
+$('gateForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); $('gateErr').textContent = ''; $('unlockBtn').textContent = 'Unlocking…';
+  await unlock($('pw').value, $('remember').checked);
+  $('unlockBtn').textContent = 'Unlock';
+});
+$('lockBtn').addEventListener('click', () => { store.clear(); location.reload(); });
+
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.tabs button').forEach((x) => { x.classList.toggle('on', x === b); $(x.dataset.tab).hidden = x !== b; });
+}));
+document.querySelectorAll('#tierFilters button').forEach((b) => b.addEventListener('click', () => {
+  S.tier = b.dataset.tier; document.querySelectorAll('#tierFilters button').forEach((x) => x.classList.toggle('on', x === b)); render();
+}));
+$('raceSelect').addEventListener('change', (e) => { S.race = e.target.value; render(); });
+
+const saved = store.get();
+if (saved) unlock(saved, false);
+</script>
+</body>
+</html>

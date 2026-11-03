@@ -1,0 +1,3 @@
+{
+ "_how_to": "To confirm or correct a race, add an entry keyed by race_id, e.g. \"GA-SEN\": {\"status\": \"Called\", \"winner\": \"Jon Ossoff (D)\", \"called_at_et\": \"8:12 PM\"}. Set status to \"Not called\" to undo an automatic flag."
+}

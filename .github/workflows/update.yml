@@ -1,0 +1,39 @@
+name: Update race data
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every 10 minutes (GitHub may run it a few minutes late)
+  workflow_dispatch: {}      # lets you click "Run workflow" by hand
+  push:
+    paths: ["data/overrides.json", "data/source.enc"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-race-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install cryptography
+      - name: Fetch headlines and flag race calls
+        env:
+          TRACKER_PASSWORD: ${{ secrets.TRACKER_PASSWORD }}
+        run: python scripts/update.py
+      - name: Commit if changed
+        run: |
+          git config user.name "race-tracker-bot"
+          git config user.email "race-tracker-bot@users.noreply.github.com"
+          git add data/site.enc
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "Update race data"
+          git pull --rebase
+          git push
