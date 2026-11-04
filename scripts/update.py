@@ -33,7 +33,7 @@ RACE_KEYWORDS = {
     "CA-34": "Los Angeles congressional", "AZ-06": "Arizona congressional", "WI-03": "Wisconsin congressional",
     "PA-08": "Pennsylvania congressional", "OH-09": "Ohio congressional", "GA-11": "Georgia congressional",
     "TX-09": "Texas congressional", "TX-GOV": "Texas governor", "FL-GOV": "Florida governor",
-    "WA-LD46": "Seattle legislative",
+    "WA-LD46": "Seattle legislative", "CA-22": "California congressional",
 }
 
 CALL_WORDS = r"(wins|win|defeats|beats|re-?elected|is elected|elected|projected winner|projected to win|holds off|holds|flips|victory)"
