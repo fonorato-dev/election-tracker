@@ -2,10 +2,10 @@ name: Update race data
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # every 10 minutes (GitHub may run it a few minutes late)
-  workflow_dispatch: {}      # lets you click "Run workflow" by hand
+    - cron: "*/10 * * * *"   # backup start; GitHub often runs this late on busy nights
+  workflow_dispatch: {}      # "Run workflow" button
   push:
-    paths: ["data/overrides.json", "data/source.enc", "scripts/**"]
+    paths: ["data/overrides.json", "data/source.enc", "scripts/**", ".github/workflows/**"]
 
 permissions:
   contents: write
@@ -17,23 +17,27 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install cryptography
-      - name: Fetch headlines and flag race calls
+      - name: Refresh every 4 minutes for up to ~5.5 hours
         env:
           TRACKER_PASSWORD: ${{ secrets.TRACKER_PASSWORD }}
-        run: python scripts/update.py
-      - name: Commit if changed
         run: |
           git config user.name "race-tracker-bot"
           git config user.email "race-tracker-bot@users.noreply.github.com"
-          git add data/site.enc
-          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
-          git commit -m "Update race data"
-          git pull --rebase
-          git push
+          end=$(( $(date +%s) + 330*60 ))
+          while [ "$(date +%s)" -lt "$end" ]; do
+            git pull -q --rebase origin main || true
+            python scripts/update.py || echo "update failed, will retry"
+            git add data/site.enc
+            if ! git diff --cached --quiet; then
+              git commit -q -m "Update race data"
+              git pull -q --rebase origin main && git push -q origin HEAD:main || echo "push failed, will retry"
+            fi
+            sleep 240
+          done
